@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P File Share</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #f0f0f0;
+    }
+    h1 {
+      color: #333;
+    }
+    #fileInput, #sendButton, #receiveButton {
+      margin: 10px;
+      padding: 10px;
+      font-size: 16px;
+    }
+    #status {
+      margin-top: 20px;
+      color: #555;
+    }
+    #link {
+      margin-top: 10px;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <h1>P2P File Share</h1>
+  <input type="file" id="fileInput" />
+  <button id="sendButton">Send File</button>
+  <input type="text" id="receiveLink" placeholder="Enter receive link" />
+  <button id="receiveButton">Receive File</button>
+  <div id="status">Status: Ready</div>
+  <div id="link"></div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const sendButton = document.getElementById('sendButton');
+    const receiveLink = document.getElementById('receiveLink');
+    const receiveButton = document.getElementById('receiveButton');
+    const status = document.getElementById('status');
+    const linkDiv = document.getElementById('link');
+
+    // STUN server configuration (free public STUN server)
+    const configuration = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    let peerConnection;
+    let dataChannel;
+
+    // Generate a random ID for signaling
+    function generateId() {
+      return Math.random().toString(36).substring(2, 10);
+    }
+
+    // Sender: Create offer and share link
+    sendButton.onclick = async () => {
+      const file = fileInput.files[0];
+      if (!file) {
+        status.textContent = 'Status: Please select a file';
+        return;
+      }
+
+      peerConnection = new RTCPeerConnection(configuration);
+      dataChannel = peerConnection.createDataChannel('fileTransfer');
+
+      // Store offer and answer for signaling
+      const offerId = generateId();
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      // Simulate signaling by sharing a link (in real app, use a signaling server or manual copy)
+      const link = `${window.location.origin}?offer=${offerId}`;
+      linkDiv.textContent = `Share this link: ${link}`;
+      status.textContent = 'Status: Waiting for receiver...';
+
+      // Mock signaling: Store offer (in real app, use a server or Firebase)
+      localStorage.setItem(offerId, JSON.stringify(offer));
+
+      dataChannel.onopen = () => {
+        status.textContent = 'Status: Connected! Sending file...';
+        const reader = new FileReader();
+        reader.onload = () => {
+          dataChannel.send(reader.result);
+          status.textContent = 'Status: File sent!';
+        };
+        reader.readAsArrayBuffer(file);
+      };
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          // In a real app, send ICE candidates via signaling server
+          console.log('ICE candidate:', event.candidate);
+        }
+      };
+    };
+
+    // Receiver: Connect using offer link
+    receiveButton.onclick = async () => {
+      const offerId = receiveLink.value.split('offer=')[1];
+      if (!offerId) {
+        status.textContent = 'Status: Invalid link';
+        return;
+      }
+
+      const offer = JSON.parse(localStorage.getItem(offerId));
+      if (!offer) {
+        status.textContent = 'Status: Offer not found';
+        return;
+      }
+
+      peerConnection = new RTCPeerConnection(configuration);
+      await peerConnection.setRemoteDescription(offer);
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      // Mock signaling: Store answer
+      localStorage.setItem(offerId + '_answer', JSON.stringify(answer));
+
+      peerConnection.ondatachannel = (event) => {
+        dataChannel = event.channel;
+        dataChannel.onmessage = (event) => {
+          const arrayBuffer = event.data;
+          const blob = new Blob([arrayBuffer]);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'received_file';
+          a.click();
+          URL.revokeObjectURL(url);
+          status.textContent = 'Status: File received!';
+        };
+      };
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          // In a real app, send ICE candidates via signaling server
+          console.log('ICE candidate:', event.candidate);
+        }
+      };
+
+      // Mock signaling: Sender checks for answer
+      const checkAnswer = setInterval(async () => {
+        const answer = JSON.parse(localStorage.getItem(offerId + '_answer'));
+        if (answer) {
+          await peerConnection.setRemoteDescription(answer);
+          clearInterval(checkAnswer);
+        }
+      }, 1000);
+    };
+  </script>
+</body>
+</html>
